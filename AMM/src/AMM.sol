@@ -47,31 +47,69 @@ contract AMM is AccessControl{
 
 		The contract must calculate buyAmount using the formula:
 	*/
-	function tradeTokens( address sellToken, uint256 sellAmount ) public {
-		require( invariant > 0, 'Invariant must be nonzero' );
-		require( sellToken == tokenA || sellToken == tokenB, 'Invalid token' );
-		require( sellAmount > 0, 'Cannot trade 0' );
-		require( invariant > 0, 'No liquidity' );
-		uint256 qtyA;
-		uint256 qtyB;
-		uint256 swapAmt;
-
-		//YOUR CODE HERE 
-
-		uint256 new_invariant = ERC20(tokenA).balanceOf(address(this))*ERC20(tokenB).balanceOf(address(this));
-		require( new_invariant >= invariant, 'Bad trade' );
-		invariant = new_invariant;
-	}
+	function tradeTokens(address sellToken, uint256 sellAmount) public {
+    require(invariant > 0, 'Invariant must be nonzero');
+    require(sellToken == tokenA || sellToken == tokenB, 'Invalid token');
+    require(sellAmount > 0, 'Cannot trade 0');
+    require(invariant > 0, 'No liquidity');
+    
+    uint256 qtyA = ERC20(tokenA).balanceOf(address(this));
+    uint256 qtyB = ERC20(tokenB).balanceOf(address(this));
+    uint256 swapAmt;
+    
+    address buyToken = (sellToken == tokenA) ? tokenB : tokenA;
+    
+    // Apply fee on input amount
+    uint256 sellAmountAfterFee = (sellAmount * (10000 - feebps)) / 10000;
+    
+    if (sellToken == tokenA) {
+        // User is selling token A, buying token B
+        // Transfer input tokens from user to the AMM
+        ERC20(tokenA).transferFrom(msg.sender, address(this), sellAmount);
+        
+        // Calculate output amount: ΔB = B - (A*B)/(A+ΔA') where ΔA' is the amount after fee
+        swapAmt = qtyB - (invariant / (qtyA + sellAmountAfterFee));
+        
+        // Transfer output tokens to the user
+        ERC20(tokenB).transfer(msg.sender, swapAmt);
+    } else {
+        // User is selling token B, buying token A
+        // Transfer input tokens from user to the AMM
+        ERC20(tokenB).transferFrom(msg.sender, address(this), sellAmount);
+        
+        // Calculate output amount: ΔA = A - (A*B)/(B+ΔB') where ΔB' is the amount after fee
+        swapAmt = qtyA - (invariant / (qtyB + sellAmountAfterFee));
+        
+        // Transfer output tokens to the user
+        ERC20(tokenA).transfer(msg.sender, swapAmt);
+    }
+    
+    // Emit swap event with the correct parameters
+    emit Swap(sellToken, buyToken, sellAmount, swapAmt);
+    
+    // Update invariant
+    uint256 new_invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+    require(new_invariant >= invariant, 'Bad trade');
+    invariant = new_invariant;
+}
 
 	/*
 		Use the ERC20 transferFrom to "pull" amtA of tokenA and amtB of tokenB from the sender
 	*/
-	function provideLiquidity( uint256 amtA, uint256 amtB ) public {
-		require( amtA > 0 || amtB > 0, 'Cannot provide 0 liquidity' );
-		//YOUR CODE HERE
-		emit LiquidityProvision( msg.sender, amtA, amtB );
-	}
-
+	function provideLiquidity(uint256 amtA, uint256 amtB) public {
+    require(amtA > 0 || amtB > 0, 'Cannot provide 0 liquidity');
+    
+    if (amtA > 0) {
+        ERC20(tokenA).transferFrom(msg.sender, address(this), amtA);
+    }
+    if (amtB > 0) {
+        ERC20(tokenB).transferFrom(msg.sender, address(this), amtB);
+    }
+    
+    invariant = ERC20(tokenA).balanceOf(address(this)) * ERC20(tokenB).balanceOf(address(this));
+    
+    emit LiquidityProvision(msg.sender, amtA, amtB);
+}
 	/*
 		Use the ERC20 transfer function to send amtA of tokenA and amtB of tokenB to the target recipient
 		The modifier onlyRole(LP_ROLE) 
